@@ -1,0 +1,40 @@
+{
+  "name": "qc-api",
+  "version": "1.0.0",
+  "description": "API to fetch product images from Doppel and transform them",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:watermark": "node server-with-watermark.js",
+    "start:production": "NODE_ENV=production node production-server.js",
+    "dev": "nodemon server.js",
+    "dev:watermark": "nodemon server-with-watermark.js",
+    "generate-key": "node scripts/generate-api-key.js",
+    "test": "bash test-api.sh",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop qc-api-production",
+    "pm2:restart": "pm2 restart qc-api-production",
+    "pm2:logs": "pm2 logs qc-api-production"
+  },
+  "keywords": [
+    "api",
+    "image",
+    "proxy"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "compression": "^1.8.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.5.1",
+    "express-validator": "^7.2.1",
+    "helmet": "^7.2.0",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
