@@ -5,15 +5,128 @@ const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const sharp = require('sharp');
+const rateLimit = require('express-rate-limit');
+const { query, validationResult } = require('express-validator');
 
-// Import middleware
-const validateApiKey = require('./middleware/auth');
-const { generalLimiter, imageLimiter } = require('./middleware/rateLimiter');
-const { 
-  validateQcImagesRequest, 
-  validateImageRequest, 
-  handleValidationErrors 
-} = require('./middleware/validator');
+// Inline middleware - API Key Authentication
+function validateApiKey(req, res, next) {
+  const apiKey = req.headers['x-api-key'] || req.query.apiKey;
+  const validApiKeys = process.env.API_KEYS ? process.env.API_KEYS.split(',') : [];
+  
+  if (validApiKeys.length === 0 && process.env.NODE_ENV !== 'production') {
+    console.warn('⚠️  Warning: No API keys configured. Running in insecure mode.');
+    return next();
+  }
+  
+  if (!apiKey) {
+    return res.status(401).json({
+      success: false,
+      error: 'Unauthorized',
+      message: 'API key is required. Include it in the X-API-Key header or apiKey query parameter.'
+    });
+  }
+  
+  if (!validApiKeys.includes(apiKey.trim())) {
+    return res.status(403).json({
+      success: false,
+      error: 'Forbidden',
+      message: 'Invalid API key'
+    });
+  }
+  
+  next();
+}
+
+// Inline middleware - Rate Limiters
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: {
+    success: false,
+    error: 'Too many requests',
+    message: 'You have exceeded the rate limit. Please try again later.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const imageLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  message: {
+    success: false,
+    error: 'Too many image requests',
+    message: 'You have exceeded the image request limit. Please try again later.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Inline middleware - Validators
+const validateQcImagesRequest = [
+  query('id')
+    .notEmpty()
+    .withMessage('Product ID is required')
+    .isLength({ min: 1, max: 50 })
+    .withMessage('Product ID must be between 1 and 50 characters')
+    .matches(/^[a-zA-Z0-9_-]+$/)
+    .withMessage('Product ID contains invalid characters'),
+  query('storePlatform')
+    .optional()
+    .isIn(['WEIDIAN', 'TAOBAO', '1688', 'TMALL'])
+    .withMessage('Invalid store platform'),
+  query('quality')
+    .optional()
+    .isInt({ min: 1, max: 100 })
+    .withMessage('Quality must be between 1 and 100'),
+  query('format')
+    .optional()
+    .isIn(['webp', 'jpeg', 'jpg', 'png'])
+    .withMessage('Invalid image format'),
+  query('width')
+    .optional()
+    .isInt({ min: 100, max: 2000 })
+    .withMessage('Width must be between 100 and 2000 pixels'),
+];
+
+const validateImageRequest = [
+  query('url')
+    .notEmpty()
+    .withMessage('Image URL is required')
+    .isLength({ min: 1, max: 500 })
+    .withMessage('URL is too long'),
+  query('quality')
+    .optional()
+    .isInt({ min: 1, max: 100 })
+    .withMessage('Quality must be between 1 and 100'),
+  query('format')
+    .optional()
+    .isIn(['webp', 'jpeg', 'jpg', 'png'])
+    .withMessage('Invalid image format'),
+  query('width')
+    .optional()
+    .isInt({ min: 100, max: 2000 })
+    .withMessage('Width must be between 100 and 2000 pixels'),
+  query('watermark')
+    .optional()
+    .isIn(['true', 'false'])
+    .withMessage('Watermark must be true or false'),
+];
+
+const handleValidationErrors = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      error: 'Validation failed',
+      details: errors.array().map(err => ({
+        field: err.path,
+        message: err.msg
+      }))
+    });
+  }
+  next();
+};
 
 const app = express();
 const BASE_URL = process.env.BASE_URL || process.env.VERCEL_URL || 'http://localhost:3000';
