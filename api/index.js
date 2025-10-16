@@ -209,18 +209,79 @@ function createLocalImageUrl(originalUrl, quality = 90, format = 'png', width = 
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
-    message: 'QC Image API - Vercel Deployment',
+    message: 'QC Image API - Multi-Platform Support',
     version: '1.0.0',
     environment: NODE_ENV,
     status: 'active',
-    documentation: {
-      authentication: 'API key required via X-API-Key header or apiKey query parameter',
-      endpoints: {
-        '/api/qc-images': 'Fetch product images',
-        '/api/image': 'Serve watermarked images',
-        '/health': 'Health check'
+    features: [
+      'Supports WEIDIAN, TAOBAO, and 1688 platforms',
+      'Automatic watermark application',
+      'Custom image quality and format',
+      'PNG output at 90% quality by default',
+      'API key authentication',
+      'Rate limiting protection'
+    ],
+    authentication: {
+      method: 'API key required via X-API-Key header or apiKey query parameter',
+      note: 'Not required for root and health endpoints'
+    },
+    endpoints: {
+      products: {
+        endpoint: '/api/qc-images',
+        method: 'GET',
+        description: 'Get product images with watermarks',
+        required_params: {
+          id: 'Product ID',
+          apiKey: 'Your API key'
+        },
+        optional_params: {
+          storePlatform: 'WEIDIAN, TAOBAO, or 1688 (default: WEIDIAN)',
+          quality: 'Image quality 1-100 (default: 90)',
+          format: 'Image format: png, webp, jpeg (default: png)',
+          width: 'Image width in pixels (default: 960)',
+          watermark: 'Enable watermarks: true or false (default: true)'
+        },
+        examples: [
+          {
+            platform: 'WEIDIAN',
+            url: `/api/qc-images?id=7494645791&storePlatform=WEIDIAN&apiKey=YOUR_API_KEY`
+          },
+          {
+            platform: 'TAOBAO',
+            url: `/api/qc-images?id=979055701113&storePlatform=TAOBAO&apiKey=YOUR_API_KEY`
+          },
+          {
+            platform: '1688',
+            url: `/api/qc-images?id=829737172123&storePlatform=1688&apiKey=YOUR_API_KEY`
+          }
+        ]
       },
-      example: `/api/qc-images?id=7494645791&apiKey=YOUR_API_KEY`
+      image: {
+        endpoint: '/api/image',
+        method: 'GET',
+        description: 'Get individual watermarked image',
+        required_params: {
+          url: 'Image URL code from Doppel (e.g., 5DLLi5dI)'
+        },
+        optional_params: {
+          watermark: 'Enable watermarks: true or false (default: true)'
+        },
+        example: `/api/image?url=5DLLi5dI`
+      },
+      health: {
+        endpoint: '/health',
+        method: 'GET',
+        description: 'Health check endpoint',
+        authentication: 'Not required'
+      }
+    },
+    watermarks: {
+      positions: {
+        image1: 'Top left corner',
+        image2: 'Top right corner',
+        image3: 'Bottom right corner'
+      },
+      size: '15% of image width'
     }
   });
 });
@@ -320,35 +381,103 @@ app.get('/api/image',
       // Add watermark if requested
       if (watermark !== 'false') {
         try {
-          const watermarkText = process.env.WATERMARK_TEXT || 'WATERMARK';
-          const watermarkOpacity = parseFloat(process.env.WATERMARK_OPACITY || '0.5');
+          const fs = require('fs');
+          const path = require('path');
           
           const metadata = await sharp(imageBuffer).metadata();
-          const fontSize = Math.max(24, Math.min(72, metadata.width / 15));
+          console.log(`Image dimensions: ${metadata.width}x${metadata.height}`);
           
-          const svgWatermark = `
-            <svg width="${metadata.width}" height="${metadata.height}">
-              <style>
-                .watermark { 
-                  fill: rgba(255, 255, 255, ${watermarkOpacity}); 
-                  font-size: ${fontSize}px; 
-                  font-weight: bold; 
-                  font-family: Arial, sans-serif;
-                }
-              </style>
-              <text x="50%" y="50%" text-anchor="middle" class="watermark">${watermarkText}</text>
-            </svg>
-          `;
-
-          imageBuffer = await sharp(imageBuffer)
-            .composite([{
-              input: Buffer.from(svgWatermark),
-              gravity: 'center'
-            }])
-            .toBuffer();
+          // Prepare watermark images with positioning
+          const watermarkComposites = [];
+          
+          // Try different path strategies for Vercel compatibility
+          const possiblePaths = [
+            process.cwd(),
+            path.join(process.cwd(), '..'),
+            '/var/task',
+            __dirname,
+            path.join(__dirname, '..')
+          ];
+          
+          let watermarksDir = null;
+          for (const basePath of possiblePaths) {
+            const testPath = path.join(basePath, 'watermarks');
+            if (fs.existsSync(testPath)) {
+              watermarksDir = testPath;
+              console.log(`Found watermarks directory at: ${testPath}`);
+              break;
+            }
+          }
+          
+          if (watermarksDir) {
+            // Image 1 - Top Left
+            const image1Path = path.join(watermarksDir, 'image1.png');
+            if (fs.existsSync(image1Path)) {
+              console.log('Adding image1.png to top-left');
+              const watermark1Buffer = await sharp(image1Path)
+                .resize({ width: Math.floor(metadata.width * 0.15) }) // 15% of image width
+                .toBuffer();
+              const watermark1Meta = await sharp(watermark1Buffer).metadata();
+              watermarkComposites.push({
+                input: watermark1Buffer,
+                top: 10,
+                left: 10
+              });
+            } else {
+              console.warn(`image1.png not found at: ${image1Path}`);
+            }
+            
+            // Image 2 - Top Right
+            const image2Path = path.join(watermarksDir, 'image2.png');
+            if (fs.existsSync(image2Path)) {
+              console.log('Adding image2.png to top-right');
+              const watermark2Buffer = await sharp(image2Path)
+                .resize({ width: Math.floor(metadata.width * 0.15) })
+                .toBuffer();
+              const watermark2Meta = await sharp(watermark2Buffer).metadata();
+              watermarkComposites.push({
+                input: watermark2Buffer,
+                top: 10,
+                left: metadata.width - watermark2Meta.width - 10
+              });
+            } else {
+              console.warn(`image2.png not found at: ${image2Path}`);
+            }
+            
+            // Image 3 - Bottom Right
+            const image3Path = path.join(watermarksDir, 'image3.png');
+            if (fs.existsSync(image3Path)) {
+              console.log('Adding image3.png to bottom-right');
+              const watermark3Buffer = await sharp(image3Path)
+                .resize({ width: Math.floor(metadata.width * 0.15) })
+                .toBuffer();
+              const watermark3Meta = await sharp(watermark3Buffer).metadata();
+              watermarkComposites.push({
+                input: watermark3Buffer,
+                top: metadata.height - watermark3Meta.height - 10,
+                left: metadata.width - watermark3Meta.width - 10
+              });
+            } else {
+              console.warn(`image3.png not found at: ${image3Path}`);
+            }
+          } else {
+            console.error('Watermarks directory not found. Searched paths:', possiblePaths);
+          }
+          
+          // Apply all watermarks if any exist
+          if (watermarkComposites.length > 0) {
+            console.log(`Applying ${watermarkComposites.length} watermarks`);
+            imageBuffer = await sharp(imageBuffer)
+              .composite(watermarkComposites)
+              .toBuffer();
+            console.log('Watermarks applied successfully');
+          } else {
+            console.warn('No watermark images found or loaded');
+          }
 
         } catch (watermarkError) {
           console.error('Error adding watermark:', watermarkError.message);
+          console.error('Stack trace:', watermarkError.stack);
         }
       }
 
